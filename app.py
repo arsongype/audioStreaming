@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+app.config['SECRET_KEY'] = 'your-secret-key-here'  # Changez ceci en production
 
 # Formats audio et vidéo supportés
 ALLOWED_AUDIO_EXTENSIONS = {'mp3', 'ogg', 'wav', 'aac', 'm4a', 'flac'}
@@ -33,7 +33,7 @@ ALLOWED_EXTENSIONS = ALLOWED_AUDIO_EXTENSIONS | ALLOWED_VIDEO_EXTENSIONS
 YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
 YOUTUBE_API_SERVICE_NAME = 'youtube'
 YOUTUBE_API_VERSION = 'v3'
-CLIENT_SECRETS_FILE = 'client_secrets.json'
+CLIENT_SECRETS_FILE = 'client_secrets.json'  # Fichier de configuration OAuth
 CREDENTIALS_FILE = 'youtube_credentials.pickle'
 
 # Configuration par défaut
@@ -135,12 +135,120 @@ def get_audio_mimetype(filename):
     ext = Path(filename).suffix.lower()
     return mime_types.get(ext, 'audio/mpeg')
 
+def get_youtube_credentials():
+    """Récupère les credentials YouTube API."""
+    creds = None
+    
+    # Charger les credentials existants
+    if os.path.exists(CREDENTIALS_FILE):
+        with open(CREDENTIALS_FILE, 'rb') as token:
+            creds = pickle.load(token)
+    
+    # Si les credentials ne sont pas valides, les renouveler
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            # Processus d'authentification OAuth
+            if not os.path.exists(CLIENT_SECRETS_FILE):
+                logger.error("Fichier client_secrets.json manquant pour l'authentification YouTube")
+                return None
+            
+            flow = Flow.from_client_secrets_file(
+                CLIENT_SECRETS_FILE,
+                scopes=YOUTUBE_SCOPES
+            )
+            flow.redirect_uri = 'http://localhost:5000/youtube/callback'
+            
+            # Cette partie nécessite une interaction utilisateur
+            # En production, vous devriez implémenter le flow OAuth complet
+            return None
+        
+        # Sauvegarder les credentials
+        with open(CREDENTIALS_FILE, 'wb') as token:
+            pickle.dump(creds, token)
+    
+    return creds
+
+def upload_to_youtube(file_path, title, description="", tags=None, privacy_status="private"):
+    """Upload un fichier vers YouTube."""
+    try:
+        creds = get_youtube_credentials()
+        if not creds:
+            return {"error": "Authentification YouTube requise"}
+        
+        youtube = build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, credentials=creds)
+        
+        # Configuration de l'upload
+        body = {
+            'snippet': {
+                'title': title,
+                'description': description,
+                'tags': tags or [],
+                'categoryId': '22'  # Catégorie "People & Blogs"
+            },
+            'status': {
+                'privacyStatus': privacy_status
+            }
+        }
+        
+        # Détecter le type de fichier
+        if is_video_file(file_path):
+            media_body = MediaFileUpload(file_path, chunksize=-1, resumable=True)
+        else:
+            # Pour les fichiers audio, nous pourrions les convertir en vidéo
+            # ou utiliser une image statique avec l'audio
+            media_body = MediaFileUpload(file_path, chunksize=-1, resumable=True)
+        
+        # Effectuer l'upload
+        insert_request = youtube.videos().insert(
+            part=','.join(body.keys()),
+            body=body,
+            media_body=media_body
+        )
+        
+        response = None
+        error = None
+        retry = 0
+        
+        while response is None:
+            try:
+                logger.info(f"Uploading {file_path} to YouTube...")
+                status, response = insert_request.next_chunk()
+                if response is not None:
+                    if 'id' in response:
+                        video_id = response['id']
+                        video_url = f"https://www.youtube.com/watch?v={video_id}"
+                        server_stats['youtube_uploads'] += 1
+                        logger.info(f"Upload terminé. Video ID: {video_id}")
+                        return {
+                            "success": True,
+                            "video_id": video_id,
+                            "video_url": video_url
+                        }
+                    else:
+                        return {"error": f"Upload échoué: {response}"}
+            except HttpError as e:
+                if e.resp.status in [500, 502, 503, 504]:
+                    retry += 1
+                    if retry > 5:
+                        return {"error": "Échec après plusieurs tentatives"}
+                    time.sleep(2 ** retry)
+                else:
+                    return {"error": f"Erreur HTTP: {e}"}
+            except Exception as e:
+                return {"error": f"Erreur inattendue: {e}"}
+        
+    except Exception as e:
+        logger.error(f"Erreur lors de l'upload YouTube: {e}")
+        return {"error": str(e)}
+
 def generate_audio(audio_file=None, loop=False):
     """Stream audio file en chunks pour simuler le streaming temps réel."""
     if audio_file is None:
         audio_file = server_stats['current_file']
     
-    if not audio_file or not os.path.exists(audio_file):
+    if not os.path.exists(audio_file):
         logger.error(f"Fichier audio non trouvé: {audio_file}")
         return
     
@@ -326,6 +434,114 @@ def upload_file():
     
     return render_template("upload.html")
 
+@app.route("/youtube/upload", methods=['POST'])
+def youtube_upload():
+    """Endpoint pour uploader vers YouTube."""
+    data = request.get_json()
+    
+    if not data or 'filename' not in data:
+        return jsonify({'error': 'Nom de fichier requis'}), 400
+    
+    filename = secure_filename(data['filename'])
+    title = data.get('title', filename)
+    description = data.get('description', '')
+    tags = data.get('tags', [])
+    privacy_status = data.get('privacy_status', 'private')
+    
+    # Rechercher le fichier
+    file_path = None
+    possible_paths = [
+        filename,
+        os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            file_path = path
+            break
+    
+    if not file_path:
+        return jsonify({'error': 'Fichier non trouvé'}), 404
+    
+    # Vérifier que c'est un fichier audio ou vidéo
+    if not (is_audio_file(filename) or is_video_file(filename)):
+        return jsonify({'error': 'Le fichier doit être audio ou vidéo'}), 400
+    
+    # Effectuer l'upload
+    result = upload_to_youtube(file_path, title, description, tags, privacy_status)
+    
+    if 'error' in result:
+        return jsonify(result), 500
+    else:
+        return jsonify(result), 200
+
+@app.route("/youtube/auth")
+def youtube_auth():
+    """Initie le processus d'authentification YouTube."""
+    if not os.path.exists(CLIENT_SECRETS_FILE):
+        return jsonify({'error': 'Configuration OAuth manquante'}), 500
+    
+    try:
+        flow = Flow.from_client_secrets_file(
+            CLIENT_SECRETS_FILE,
+            scopes=YOUTUBE_SCOPES
+        )
+        flow.redirect_uri = url_for('youtube_callback', _external=True)
+        
+        authorization_url, state = flow.authorization_url(
+            access_type='offline',
+            include_granted_scopes='true'
+        )
+        
+        # Stocker l'état dans la session (en production, utilisez une session sécurisée)
+        return jsonify({
+            'auth_url': authorization_url,
+            'state': state
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route("/youtube/callback")
+def youtube_callback():
+    """Callback pour l'authentification YouTube."""
+    try:
+        flow = Flow.from_client_secrets_file(
+            CLIENT_SECRETS_FILE,
+            scopes=YOUTUBE_SCOPES,
+            state=request.args.get('state')
+        )
+        flow.redirect_uri = url_for('youtube_callback', _external=True)
+        
+        authorization_response = request.url
+        flow.fetch_token(authorization_response=authorization_response)
+        
+        # Sauvegarder les credentials
+        with open(CREDENTIALS_FILE, 'wb') as token:
+            pickle.dump(flow.credentials, token)
+        
+        return jsonify({'success': True, 'message': 'Authentification réussie!'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route("/files")
+def list_files():
+    """Endpoint pour lister les fichiers disponibles."""
+    audio_files = get_all_audio_files()
+    video_files = []
+    
+    for ext in ALLOWED_VIDEO_EXTENSIONS:
+        video_files.extend([str(f) for f in Path('.').glob(f'*.{ext}')])
+    
+    if Path(app.config['UPLOAD_FOLDER']).exists():
+        for ext in ALLOWED_VIDEO_EXTENSIONS:
+            files = [str(f) for f in Path(app.config['UPLOAD_FOLDER']).glob(f'*.{ext}')]
+            video_files.extend(files)
+    
+    return jsonify({
+        'audio_files': audio_files,
+        'video_files': video_files
+    })
+
 @app.route("/switch/<path:filename>")
 def switch_audio(filename):
     """Endpoint pour changer le fichier audio en cours de diffusion."""
@@ -406,14 +622,18 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'error': 'Erreur interne du serveur'}), 500
 
-# Route de test pour vérifier que Flask fonctionne
-@app.route("/test")
-def test():
-    return "Flask fonctionne correctement sur Render!"
-
 if __name__ == "__main__":
     # Création du dossier d'upload si nécessaire
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    
+    # Vérification des prérequis YouTube
+    if not os.path.exists(CLIENT_SECRETS_FILE):
+        logger.warning("Fichier client_secrets.json manquant pour YouTube API")
+        logger.info("Pour activer l'upload YouTube:")
+        logger.info("1. Créez un projet sur Google Cloud Console")
+        logger.info("2. Activez l'API YouTube Data API v3")
+        logger.info("3. Créez des identifiants OAuth 2.0")
+        logger.info("4. Téléchargez le fichier client_secrets.json")
     
     # Vérification de l'existence d'un fichier audio
     current_file = server_stats['current_file']
@@ -423,12 +643,10 @@ if __name__ == "__main__":
     else:
         logger.info(f"Fichier audio actuel: {current_file}")
     
-    # Configuration pour la production
-    port = int(os.environ.get('PORT', 5000))
-    
     # Démarrage du serveur
-    logger.info("Démarrage du serveur de diffusion audio/vidéo...")
+    logger.info("Démarrage du serveur de diffusion audio/vidéo avec support YouTube...")
     logger.info(f"Formats audio supportés: {', '.join(ALLOWED_AUDIO_EXTENSIONS)}")
     logger.info(f"Formats vidéo supportés: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}")
+    logger.info("Interface web disponible sur: http://localhost:5000")
     
-    app.run(debug=False, threaded=True, port=port, host='0.0.0.0')
+    app.run(debug=True, threaded=True, port=5000, host='0.0.0.0')
