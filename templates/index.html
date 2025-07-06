@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serveur de Diffusion Audio/Vidéo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .player-section {
+            text-align: center;
+        }
+
+        .audio-player {
+            width: 100%;
+            margin: 20px 0;
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 10px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            color: white;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+        }
+
+        .btn-success {
+            background: linear-gradient(45deg, #56ab2f, #a8e6cf);
+        }
+
+        .btn-warning {
+            background: linear-gradient(45deg, #f093fb, #f5576c);
+        }
+
+        .btn-info {
+            background: linear-gradient(45deg, #4facfe, #00f2fe);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .current-track {
+            background: linear-gradient(45deg, #ffecd2, #fcb69f);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-item {
+            background: linear-gradient(45deg, #a8edea, #fed6e3);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            color: #333;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+
+        .file-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background: #f8f9fa;
+        }
+
+        .file-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-item.current {
+            background: #e3f2fd;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .upload-section {
+            text-align: center;
+        }
+
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            padding: 40px;
+            margin: 20px 0;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .upload-area:hover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        .youtube-section {
+            margin-top: 20px;
+        }
+
+        .youtube-form {
+            display: grid;
+            gap: 15px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+            display: none;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .message {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            display: none;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .message.info {
+            background: #cce7ff;
+            color: #004085;
+            border: 1px solid #b8d4f0;
+        }
+
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .btn {
+                width: 100%;
+                max-width: 300px;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎵 Serveur de Diffusion Audio</h1>
+            <p>Diffusion audio en continu</p>
+        </div>
+
+        <!-- Lecteur Audio -->
+        <div class="card">
+            <div class="player-section">
+                <h2>🎧 Lecteur Audio</h2>
+                
+                <div class="current-track" id="current-track">
+                    {% if current_file %}
+                        🎵 En cours: {{ current_file.split('/')[-1] }} ({{ current_index + 1 }}/{{ total_files }})
+                    {% else %}
+                        Aucun fichier en cours de diffusion
+                    {% endif %}
+                </div>
+
+                <audio controls class="audio-player" id="audio-player">
+                    <source src="{{ stream_url }}" type="audio/mpeg">
+                    Votre navigateur ne supporte pas l'élément audio.
+                </audio>
+
+                <div class="controls">
+                    <button class="btn btn-primary" onclick="previousTrack()">⏮️ Précédent</button>
+                    <button class="btn btn-success" onclick="playStream()">▶️ Lire</button>
+                    <button class="btn btn-warning" onclick="pauseStream()">⏸️ Pause</button>
+                    <button class="btn btn-primary" onclick="nextTrack()">⏭️ Suivant</button>
+                    <button class="btn btn-info" onclick="refreshStats()">🔄 Actualiser</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistiques -->
+        <div class="card">
+            <h2>📊 Statistiques du Serveur</h2>
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-value" id="listeners">0</div>
+                    <div class="stat-label">Auditeurs connectés</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="total-connections">0</div>
+                    <div class="stat-label">Connexions totales</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="uptime">0s</div>
+                    <div class="stat-label">Temps de fonctionnement</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Liste des fichiers -->
+        <div class="card">
+            <h2>📁 Fichiers Audio Disponibles</h2>
+            <div class="file-list" id="audio-files">
+                {% for file in audio_files %}
+                <div class="file-item {% if file == current_file %}current{% endif %}">
+                    <span>🎵 {{ file.split('/')[-1] }}</span>
+                    <div class="file-actions">
+                        <button class="btn btn-sm btn-primary" onclick="switchAudio('{{ file.split('/')[-1] }}')">
+                            Lire
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if not audio_files %}
+                <div class="file-item">
+                    <span>Aucun fichier audio disponible</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Section Upload -->
+        <div class="card">
+            <div class="upload-section">
+                <h2>📤 Télécharger des Fichiers</h2>
+                <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
+                    <p>🎵 Cliquez ici ou glissez-déposez vos fichiers audio</p>
+                    <p><small>Formats supportés: MP3, OGG, WAV, AAC, M4A, FLAC</small></p>
+                </div>
+                <input type="file" id="file-input" multiple accept=".mp3,.ogg,.wav,.aac,.m4a,.flac" style="display: none;">
+                <div class="progress-bar" id="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="message" id="upload-message"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentAudio = null;
+        let statsInterval = null;
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+            initializePlayer();
+            loadStats();
+            setupUpload();
+            
+            // Actualiser les stats toutes les 5 secondes
+            statsInterval = setInterval(loadStats, 5000);
+        });
+
+        function initializePlayer() {
+            const audio = document.getElementById('audio-player');
+            currentAudio = audio;
+            
+            // Événements du lecteur
+            audio.addEventListener('loadstart', function() {
+                console.log('Chargement du stream...');
+            });
+            
+            audio.addEventListener('error', function(e) {
+                console.error('Erreur audio:', e);
+                showMessage('Erreur lors du chargement du stream audio', 'error');
+            });
+        }
+
+        function playStream() {
+            if (currentAudio) {
+                currentAudio.play().catch(function(error) {
+                    console.error('Erreur lors de la lecture:', error);
+                    showMessage('Erreur lors de la lecture. Vérifiez qu\'un fichier audio est disponible.', 'error');
+                });
+            }
+        }
+
+        function pauseStream() {
+            if (currentAudio) {
+                currentAudio.pause();
+            }
+        }
+
+        function nextTrack() {
+            fetch('/next')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateCurrentTrack(data.current_file, data.current_index, data.total_files);
+                        reloadAudioSource();
+                        showMessage('Fichier suivant chargé', 'success');
+                    } else {
+                        showMessage(data.error || 'Erreur lors du changement de fichier', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Erreur:', error);
+                    showMessage('Erreur de connexion', 'error');
+                });
+        }
+
+        function previousTrack() {
+            fetch('/previous')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateCurrentTrack(data.current_file, data.current_index, data.total_files);
+                        reloadAudioSource();
+                        showMessage('Fichier précédent chargé', 'success');
+                    } else {
+                        showMessage(data.error || 'Erreur lors du changement de fichier', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Erreur:', error);
+                    showMessage('Erreur de connexion', 'error');
+                });
+        }
+
+        function switchAudio(filename) {
+            fetch(`/switch/${filename}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateCurrentTrack(data.current_file, data.current_index, data.total_files);
+                        reloadAudioSource();
+                        showMessage(`Fichier changé vers: ${filename}`, 'success');
+                        updateFileList();
+                    } else {
+                        showMessage(data.error || 'Erreur lors du changement de fichier', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Erreur:', error);
+                    showMessage('Erreur de connexion', 'error');
+                });
+        }
+
+        function updateCurrentTrack(filepath, index, total) {
+            const filename = filepath.split('/').pop();
+            const currentTrack = document.getElementById('current-track');
+            currentTrack.innerHTML = `🎵 En cours: ${filename} (${index + 1}/${total})`;
+        }
+
+        function reloadAudioSource() {
+            if (currentAudio) {
+                const wasPlaying = !currentAudio.paused;
+                currentAudio.load();
+                if (wasPlaying) {
+                    currentAudio.play();
+                }
+            }
+        }
+
+        function updateFileList() {
+            // Recharger la page pour mettre à jour la liste des fichiers
+            // En production, vous pourriez implémenter une mise à jour AJAX
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        }
+
+        function loadStats() {
+            fetch('/stats')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('listeners').textContent = data.listeners;
+                    document.getElementById('total-connections').textContent = data.total_connections;
+                    document.getElementById('uptime').textContent = data.uptime_formatted;
+                })
+                .catch(error => {
+                    console.error('Erreur lors du chargement des stats:', error);
+                });
+        }
+
+        function refreshStats() {
+            loadStats();
+            showMessage('Statistiques actualisées', 'info');
+        }
+
+        function setupUpload() {
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+
+            // Drag and drop
+            uploadArea.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+
+            uploadArea.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+            });
+
+            uploadArea.addEventListener('drop', function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                uploadFiles(files);
+            });
+
+            fileInput.addEventListener('change', function(e) {
+                uploadFiles(e.target.files);
+            });
+        }
+
+        function uploadFiles(files) {
+            if (files.length === 0) return;
+
+            const formData = new FormData();
+            const progressBar = document.getElementById('progress-bar');
+            const progressFill = document.getElementById('progress-fill');
+
+            progressBar.style.display = 'block';
+            progressFill.style.width = '0%';
+
+            Array.from(files).forEach(file => {
+                formData.append('file', file);
+            });
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                progressFill.style.width = '100%';
+                setTimeout(() => {
+                    progressBar.style.display = 'none';
+                    if (data.success) {
+                        showMessage(`Fichier uploadé avec succès: ${data.filename}`, 'success');
+                        updateFileList();
+                    } else {
+                        showMessage(data.error || 'Erreur lors de l\'upload', 'error');
+                    }
+                }, 500);
+            })
+            .catch(error => {
+                progressBar.style.display = 'none';
+                console.error('Erreur:', error);
+                showMessage('Erreur lors de l\'upload', 'error');
+            });
+        }
+
+        function showMessage(text, type) {
+            const messages = document.querySelectorAll('.message');
+            messages.forEach(msg => {
+                msg.style.display = 'none';
+                msg.className = 'message';
+            });
+
+            const message = document.getElementById('upload-message');
+            message.textContent = text;
+            message.className = `message ${type}`;
+            message.style.display = 'block';
+
+            setTimeout(() => {
+                message.style.display = 'none';
+            }, 5000);
+        }
+
+        // Nettoyage lors de la fermeture
+        window.addEventListener('beforeunload', function() {
+            if (statsInterval) {
+                clearInterval(statsInterval);
+            }
+        });
+    </script>
+</body>
+</html>
